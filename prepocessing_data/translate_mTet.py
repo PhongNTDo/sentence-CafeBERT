@@ -24,15 +24,18 @@ def translation(inputs):
     return translated
 
 
-file = "data/snli_1.0_train.txt"
+file = "data/squad.txt"
 fo = open(file.rsplit('.', 1)[0] + "_vi.txt", "w")
 
+count = 0
 with open(file) as f:
     for line in tqdm.tqdm(f.readlines()):
         line = line.strip()
         if line == "":
             continue
 
+        if len(line.split('\t')) != 3:
+            continue
         sent1, sent2 = line.split('\t')[:2]
         label = line.split('\t')[-1]
 
@@ -41,4 +44,7 @@ with open(file) as f:
         translated = translation(inps)
 
         fo.write(f"{translated[0]}\t{translated[1]}\t{label}\n")
+        count += 1
+        if count > 100000:
+            break
 fo.close()
