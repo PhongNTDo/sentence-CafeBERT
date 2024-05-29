@@ -9,6 +9,7 @@ As loss function, we use OnlineConstrativeLoss. It reduces the distance between 
 An issue with constrative loss is, that it might push sentences away that are already well positioned in vector space.
 """
 
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from sentence_transformers import losses, util
 from sentence_transformers import LoggingHandler, SentenceTransformer, evaluation, models
@@ -32,11 +33,12 @@ logger = logging.getLogger(__name__)
 # model = SentenceTransformer("stsb-distilbert-base")
 word_embedding_model = models.Transformer('bert-base-multilingual-cased', max_seq_length=256)
 pooling_model = models.Pooling(word_embedding_model.get_word_embedding_dimension())
-dense_model = models.Dense(in_features=pooling_model.get_sentence_embedding_dimension(), out_features=256, activation_function=nn.nn.Tanh())
+dense_model = models.Dense(in_features=pooling_model.get_sentence_embedding_dimension(), out_features=256, activation_function=nn.Tanh())
 
 model = SentenceTransformer(modules=[word_embedding_model, pooling_model, dense_model])
+model = model.cuda()
 num_epochs = 10
-train_batch_size = 64
+train_batch_size = 8
 
 # As distance metric, we use cosine distance (cosine_distance = 1-cosine_similarity)
 distance_metric = losses.SiameseDistanceMetric.COSINE_DISTANCE
@@ -44,26 +46,22 @@ distance_metric = losses.SiameseDistanceMetric.COSINE_DISTANCE
 # Negative pairs should have a distance of at least 0.5
 margin = 0.5
 
-dataset_path = "quora-IR-dataset"
+dataset_path = "data/snli_1.0_train_vi.txt"
 model_save_path = "output/training_OnlineConstrativeLoss-" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 os.makedirs(model_save_path, exist_ok=True)
 
 # Check if the dataset exists. If not, download and extract
 if not os.path.exists(dataset_path):
-    logger.info("Dataset not found. Download")
-    zip_save_path = "quora-IR-dataset.zip"
-    util.http_get(url="https://sbert.net/datasets/quora-IR-dataset.zip", path=zip_save_path)
-    with ZipFile(zip_save_path, "r") as zip:
-        zip.extractall(dataset_path)
+    logger.info("Dataset not found.")
 
 ######### Read train data  ##########
 # Read train data
 train_samples = []
-with open(os.path.join(dataset_path, "classification/train_pairs.tsv"), encoding="utf8") as fIn:
-    reader = csv.DictReader(fIn, delimiter="\t", quoting=csv.QUOTE_NONE)
-    for row in reader:
-        sample = InputExample(texts=[row["question1"], row["question2"]], label=int(row["is_duplicate"]))
+with open(dataset_path, encoding="utf8") as fIn:
+    for line in fIn.readlines():
+        text1, text2, label = line.strip().split('\t')
+        sample = InputExample(texts=[text1, text2], label=int(label))
         train_samples.append(sample)
 
 train_dataloader = DataLoader(train_samples, shuffle=True, batch_size=train_batch_size)
@@ -81,90 +79,15 @@ evaluators = []
 dev_sentences1 = []
 dev_sentences2 = []
 dev_labels = []
-with open(os.path.join(dataset_path, "classification/dev_pairs.tsv"), encoding="utf8") as fIn:
-    reader = csv.DictReader(fIn, delimiter="\t", quoting=csv.QUOTE_NONE)
-    for row in reader:
-        dev_sentences1.append(row["question1"])
-        dev_sentences2.append(row["question2"])
-        dev_labels.append(int(row["is_duplicate"]))
+with open("data/snli_1.0_dev_vi.txt", encoding="utf8") as fIn:
+    for line in fIn.readlines():
+        text1, text2, label = line.strip().split("\t")
+        dev_sentences1.append(text1)
+        dev_sentences2.append(text2)
+        dev_labels.append(int(label))
 
 binary_acc_evaluator = evaluation.BinaryClassificationEvaluator(dev_sentences1, dev_sentences2, dev_labels)
 evaluators.append(binary_acc_evaluator)
-
-###### Duplicate Questions Mining ######
-# Given a large corpus of questions, identify all duplicates in that corpus.
-
-# For faster processing, we limit the development corpus to only 10,000 sentences.
-max_dev_samples = 10000
-dev_sentences = {}
-dev_duplicates = []
-with open(os.path.join(dataset_path, "duplicate-mining/dev_corpus.tsv"), encoding="utf8") as fIn:
-    reader = csv.DictReader(fIn, delimiter="\t", quoting=csv.QUOTE_NONE)
-    for row in reader:
-        dev_sentences[row["qid"]] = row["question"]
-
-        if len(dev_sentences) >= max_dev_samples:
-            break
-
-with open(os.path.join(dataset_path, "duplicate-mining/dev_duplicates.tsv"), encoding="utf8") as fIn:
-    reader = csv.DictReader(fIn, delimiter="\t", quoting=csv.QUOTE_NONE)
-    for row in reader:
-        if row["qid1"] in dev_sentences and row["qid2"] in dev_sentences:
-            dev_duplicates.append([row["qid1"], row["qid2"]])
-
-# The ParaphraseMiningEvaluator computes the cosine similarity between all sentences and
-# extracts a list with the pairs that have the highest similarity. Given the duplicate
-# information in dev_duplicates, it then computes and F1 score how well our duplicate mining worked
-paraphrase_mining_evaluator = evaluation.ParaphraseMiningEvaluator(dev_sentences, dev_duplicates, name="dev")
-evaluators.append(paraphrase_mining_evaluator)
-
-###### Duplicate Questions Information Retrieval ######
-# Given a question and a large corpus of thousands questions, find the most relevant (i.e. duplicate) question
-# in that corpus.
-
-# For faster processing, we limit the development corpus to only 10,000 sentences.
-max_corpus_size = 100000
-
-ir_queries = {}  # Our queries (qid => question)
-ir_needed_qids = set()  # QIDs we need in the corpus
-ir_corpus = {}  # Our corpus (qid => question)
-ir_relevant_docs = {}  # Mapping of relevant documents for a given query (qid => set([relevant_question_ids])
-
-with open(os.path.join(dataset_path, "information-retrieval/dev-queries.tsv"), encoding="utf8") as fIn:
-    next(fIn)  # Skip header
-    for line in fIn:
-        qid, query, duplicate_ids = line.strip().split("\t")
-        duplicate_ids = duplicate_ids.split(",")
-        ir_queries[qid] = query
-        ir_relevant_docs[qid] = set(duplicate_ids)
-
-        for qid in duplicate_ids:
-            ir_needed_qids.add(qid)
-
-# First get all needed relevant documents (i.e., we must ensure, that the relevant questions are actually in the corpus
-distraction_questions = {}
-with open(os.path.join(dataset_path, "information-retrieval/corpus.tsv"), encoding="utf8") as fIn:
-    next(fIn)  # Skip header
-    for line in fIn:
-        qid, question = line.strip().split("\t")
-
-        if qid in ir_needed_qids:
-            ir_corpus[qid] = question
-        else:
-            distraction_questions[qid] = question
-
-# Now, also add some irrelevant questions to fill our corpus
-other_qid_list = list(distraction_questions.keys())
-random.shuffle(other_qid_list)
-
-for qid in other_qid_list[0: max(0, max_corpus_size - len(ir_corpus))]:
-    ir_corpus[qid] = distraction_questions[qid]
-
-# Given queries, a corpus and a mapping with relevant documents, the InformationRetrievalEvaluator computes different IR
-# metrices. For our use case MRR@k and Accuracy@k are relevant.
-ir_evaluator = evaluation.InformationRetrievalEvaluator(ir_queries, ir_corpus, ir_relevant_docs)
-
-evaluators.append(ir_evaluator)
 
 # Create a SequentialEvaluator. This SequentialEvaluator runs all three evaluators in a sequential order.
 # We optimize the model with respect to the score from the last evaluator (scores[-1])
