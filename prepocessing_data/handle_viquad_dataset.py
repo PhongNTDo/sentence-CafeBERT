@@ -44,8 +44,8 @@ def extract_data(file, out_file, org_lang="vi"):
 
 
 
-dir = "/Users/thuanphong180100/Documents/QAdataset/ViQuAD1.1"
-list_file_dataset = ["train_ViQuAD.json", "dev_ViQuAD.json", "test_ViQuAD.json"]
+dir = "./ViNewsQA"
+list_file_dataset = ["train_ViNewsQA.json", "dev_ViNewsQA.json", "test_ViNewsQA.json"]
 out_dir = "./data"
 
 for file in list_file_dataset:
