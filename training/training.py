@@ -31,13 +31,13 @@ logger = logging.getLogger(__name__)
 
 # As base model, we use DistilBERT-base that was pre-trained on NLI and STSb data
 # model = SentenceTransformer("stsb-distilbert-base")
-word_embedding_model = models.Transformer('uitnlp/CafeBERT', max_seq_length=256)
+word_embedding_model = models.Transformer('bert-base-multilingual-cased', max_seq_length=256)
 pooling_model = models.Pooling(word_embedding_model.get_word_embedding_dimension())
 dense_model = models.Dense(in_features=pooling_model.get_sentence_embedding_dimension(), out_features=256, activation_function=nn.Tanh())
 
 model = SentenceTransformer(modules=[word_embedding_model, pooling_model, dense_model])
 model = model.cuda()
-num_epochs = 10
+num_epochs = 2
 train_batch_size = 8
 
 # As distance metric, we use cosine distance (cosine_distance = 1-cosine_similarity)
@@ -104,3 +104,7 @@ model.fit(
     warmup_steps=1000,
     output_path=model_save_path,
 )
+
+model.push_to_hub(repo_id="ThuanPhong/sentence_CafeBERT",
+                  token="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",
+                  commit_message="demo")
