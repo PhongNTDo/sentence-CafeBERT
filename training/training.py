@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # As base model, we use DistilBERT-base that was pre-trained on NLI and STSb data
 # model = SentenceTransformer("stsb-distilbert-base")
-word_embedding_model = models.Transformer('bert-base-multilingual-cased', max_seq_length=256)
+word_embedding_model = models.Transformer('uitnlp/CafeBERT', max_seq_length=256)
 pooling_model = models.Pooling(word_embedding_model.get_word_embedding_dimension())
 dense_model = models.Dense(in_features=pooling_model.get_sentence_embedding_dimension(), out_features=256, activation_function=nn.Tanh())
 
@@ -46,7 +46,7 @@ distance_metric = losses.SiameseDistanceMetric.COSINE_DISTANCE
 # Negative pairs should have a distance of at least 0.5
 margin = 0.5
 
-dataset_path = "data/train_mini_corpus.txt"
+dataset_path = "/data/training_text_mini.txt"
 model_save_path = "output/training_OnlineConstrativeLoss-" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 os.makedirs(model_save_path, exist_ok=True)
@@ -79,7 +79,7 @@ evaluators = []
 dev_sentences1 = []
 dev_sentences2 = []
 dev_labels = []
-with open("data/dev_mini_corpus.txt", encoding="utf8") as fIn:
+with open("/data/valid_text_mini.txt", encoding="utf8") as fIn:
     for line in fIn.readlines():
         text1, text2, label = line.strip().split("\t")
         dev_sentences1.append(text1)
